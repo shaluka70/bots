@@ -1,7 +1,0 @@
-npm install @whiskeysockets/baileys pino express fs-extra cors archiver qrcode-terminal axios yt-search
-
-.\ngrok config add-authtoken 36dfj130RbspSC7KGxW6BP7AwVZ_7hb1j6LQtRjU8baSjK5oY
-
-node index.js
-
-.\ngrok http --domain=unreverberated-dustproof-myrle.ngrok-free.dev 3006
