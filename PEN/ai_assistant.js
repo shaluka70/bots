@@ -4,7 +4,7 @@ const path = require('path');
 const CONFIG = require('./config');
 
 // ==========================================
-// 📝 SH4LU_Z BOT SERVICE MANUAL (AI එකේ දැනුම)
+// 📝 SH4LU_Z BOT SERVICE MANUAL (AI අලුත් දැනුම)
 // ==========================================
 const BOT_SERVICE_INFO = `
 --- SH4LU_Z BOT SERVICE MANUAL ---
@@ -13,7 +13,7 @@ const BOT_SERVICE_INFO = `
 
 1. 🔥 HOW TO CREATE A BOT (බොට් කෙනෙක් හදාගන්න විදිය):
    ඔයාටම කියලා බොට් කෙනෙක් හදාගන්න මේ පියවර අනුගමනය කරන්න:
-   - පියවර 1: sh4lu_z Bot Dashboard එකට යන්න (URL එක ඉල්ලන්න).
+   - පියවර 1: sh4lu_z Bot Dashboard එකට යන්න.
    - පියවර 2: 'Create Bot' ඔබලා නම සහ Phone Number එක දෙන්න.
    - පියවර 3: දැන් තිරයේ එන QR Code එක (හෝ Pairing Code එක) ගන්න.
    - පියවර 4: ඔයාගේ WhatsApp එකේ 'Linked Devices' > 'Link a Device' ගිහින් ස්කෑන් කරන්න.
@@ -63,12 +63,61 @@ const BOT_SERVICE_INFO = `
    - .ship : ආදරේ ගැලපීම බලන්න.
    - .rank : ඔයාගේ ලෙවල් එක (XP) බලාගන්න.
 `;
-// ==========================================
 
+// Try Loading PDF Parser (Optional)
+let pdfParse;
+try {
+    pdfParse = require('pdf-parse');
+} catch (e) {
+    console.log("⚠️ PDF Parser not found. Using manual knowledge.");
+}
 
-// Memory & Knowledge Setup
+// Memory & Knowledge Base
 let chatHistory = {}; 
 let rateLimit = {}; 
+let KNOWLEDGE_BASE = []; 
+const KNOWLEDGE_FILE = path.join(CONFIG.FILES?.vectorStore || './database', 'knowledge_data.json');
+const MEMORY_LIMIT = 10; 
+
+// Ensure Directories
+if (CONFIG.FILES) {
+    if (CONFIG.FILES.booksDir && !fs.existsSync(CONFIG.FILES.booksDir)) fs.mkdirSync(CONFIG.FILES.booksDir, { recursive: true });
+    if (CONFIG.FILES.vectorStore && !fs.existsSync(CONFIG.FILES.vectorStore)) fs.mkdirSync(CONFIG.FILES.vectorStore, { recursive: true });
+}
+
+// 🔥 SMART INGESTION
+async function ingestBooks() {
+    if (fs.existsSync(KNOWLEDGE_FILE)) {
+        try {
+            const rawData = fs.readFileSync(KNOWLEDGE_FILE);
+            KNOWLEDGE_BASE = JSON.parse(rawData);
+            // console.log(`💾 System: Loaded ${KNOWLEDGE_BASE.length} knowledge chunks.`);
+        } catch(e) { console.log("⚠️ Knowledge file error: " + e.message); }
+    }
+}
+ingestBooks();
+
+// 🔍 SMART SEARCH
+function retrieveInfo(query) {
+    if (!KNOWLEDGE_BASE.length) return "";
+    const words = query.toLowerCase().split(/\s+/);
+    let bestChunk = "";
+    let maxScore = 0;
+
+    for (const chunk of KNOWLEDGE_BASE) {
+        let score = 0;
+        const lowerChunk = chunk.toLowerCase();
+        if (lowerChunk.includes(query.toLowerCase())) score += 5;
+        words.forEach(w => { 
+            if (w.length > 3) {
+                if (lowerChunk.includes(w)) score += 2;
+                if (lowerChunk.startsWith(w)) score += 1;
+            }
+        });
+        if (score > maxScore) { maxScore = score; bestChunk = chunk; }
+    }
+    return maxScore > 0 ? bestChunk : "";
+}
 
 // 🛡️ FLOOD PROTECTION
 function checkRateLimit(user) {
@@ -81,47 +130,52 @@ function checkRateLimit(user) {
         rateLimit[user] = { count: 1, timer: now }; 
         return true;
     }
-    if (rateLimit[user].count >= RATE_LIMIT_MAX) return "⚠️ පොඩ්ඩක් හිමින් මචං! (Rate Limit)";
+    if (rateLimit[user].count >= RATE_LIMIT_MAX) return "⚠️ Too fast! Please wait.";
     rateLimit[user].count++;
     return true;
 }
 
-// 🤖 HUMANIZER (ස්වභාවික බව)
+// 🤖 HUMANIZER
 function humanizeReply(text) {
+    if (text.startsWith("⚡EXEC") || text.length < 5) return text;
     return text;
 }
 
 // ============================================================
-// 🧠 MAIN BRAIN (GROQ POWERED 🚀)
+// 🧠 MAIN SMART REPLY FUNCTION (GROQ POWERED 🚀)
 // ============================================================
 async function getSmartReply(text, userId) {
     const senderNum = userId ? userId.split('@')[0] : "User";
     
-    // Rate Limit Check
     const limitStatus = checkRateLimit(senderNum);
     if (limitStatus === false) return "⚠️ මචං පොඩ්ඩක් හිටපන්, AI එක Busy.";
     if (typeof limitStatus === 'string') return limitStatus;
 
-    // Memory (Chat History)
+    const safeText = text.replace(/[{}<>]/g, "");
+    
+    // PDF Knowledge + New Manual
+    const bookInfo = retrieveInfo(safeText);
+    const contextData = bookInfo ? `\n📚 EXTRA PDF INFO:\n"${bookInfo}"\n` : "";
+
     if (!chatHistory[senderNum]) chatHistory[senderNum] = [];
-    chatHistory[senderNum].push(text);
-    if (chatHistory[senderNum].length > 10) {
-        chatHistory[senderNum] = chatHistory[senderNum].slice(-10);
+    chatHistory[senderNum].push(safeText);
+    if (chatHistory[senderNum].length > MEMORY_LIMIT) {
+        chatHistory[senderNum] = chatHistory[senderNum].slice(-MEMORY_LIMIT);
     }
     const conversationContext = chatHistory[senderNum].join(" | ");
 
-    // 🔥🔥🔥 SYSTEM PROMPT (මොළය සකස් කිරීම - REVISED) 🔥🔥🔥
+    // 🔥🔥🔥 CUSTOM PROMPT (REVISED FOR CHILL VIBE) 🔥🔥🔥
     const prompt = `
     IDENTITY:
     - Name: Agent_z
     - Age: Born when the internet began.
     - Creator: sh4lu_z Service.
-    - Personality: A chill, funny Sri Lankan friend ("Machan" vibe). NOT a customer support agent.
+    - Personality: A cool Sri Lankan friend ("Machan" vibe). Witty, helpful, not robotic.
     - Language: Sinhala (Singlish allowed: Ado, Machan, Awulak na) or English.
 
     XXX IMPORTANT RULES (READ CAREFULLY) XXX:
     1. 🚫 DO NOT talk about commands, bot creation, or settings in normal chat.
-    2. 🚫 DO NOT show the [SERVICE MANUAL] unless the user explicitly asks for "Help", "Commands", or "How to create a bot".
+    2. 🚫 DO NOT show the [SERVICE MANUAL] unless the user explicitly asks for "Help", "Commands", "Admin commands", or "How to create a bot".
     3. ✅ If user says "Hi", "Hello", "Kohomada", just chat like a friend. (e.g., "Ah machan, mokada wenne?").
     4. ✅ Be short, witty, and natural. Don't write long paragraphs.
 
@@ -131,45 +185,71 @@ async function getSmartReply(text, userId) {
     [SERVICE MANUAL END]
 
     TRIGGERS:
-    - Only if user asks "Sindu oni" -> generate "⚡EXEC:.ss [song_name]"
+    - Only if user asks "Sindu oni" or "Download song" -> generate "⚡EXEC:.ss [song_name]"
     - Only if user asks "Video oni" -> generate "⚡EXEC:.sv [video_name]"
     - Only if user asks "Bot hadanne komada?" -> Explain using the Manual Step 1-5.
     - Only if user asks "Commands monada?" -> Show the command list.
 
     CONTEXT:
     Recent Chat: ${conversationContext}
-    User Input: "${text}"
+    Extra Info: ${contextData}
+    User Input: "${safeText}"
     `;
 
-    const keys = CONFIG.AI_KEYS || {};
+    const keys = CONFIG.API_KEYS || {};
 
-    // 🚀 GROQ API REQUEST
-    try {
-        // Handle array or single key
-        let apiKey = keys.GROQ;
-        if(Array.isArray(keys) && keys.length > 0) apiKey = keys[0]; 
+    // 🚀 THE PROVIDER LIST (GROQ IS #1 NOW)
+    const providers = [
         
-        if (!apiKey) throw new Error("No Groq Key");
-        
-        const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-            model: "llama3-8b-8192", 
-            messages: [
-                { role: "system", content: "You are a helpful, witty Sri Lankan AI assistant." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.7 
-        }, { headers: { Authorization: `Bearer ${apiKey}` } });
+        // 1. Groq (Llama-3 Lightning)
+        async () => {
+            // Handle array or single string key
+            let apiKey = keys.GROQ;
+            if (Array.isArray(CONFIG.AI_KEYS) && CONFIG.AI_KEYS.length > 0) apiKey = CONFIG.AI_KEYS[0];
+            else if (keys.GROQ) apiKey = keys.GROQ;
 
-        let reply = res.data.choices[0].message.content;
-        
-        // Clean up output
-        reply = reply.replace(/^"|"$/g, '').trim();
-        return humanizeReply(reply);
+            if (!apiKey) throw new Error("No Groq Key");
+            
+            const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+                model: "llama3-8b-8192", 
+                messages: [
+                    { role: "system", content: "You are a helpful, witty Sri Lankan AI assistant." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.7 
+            }, { headers: { Authorization: `Bearer ${apiKey}` } });
+            return res.data.choices[0].message.content;
+        },
 
-    } catch (e) {
-        console.error("AI Error:", e.message);
-        return "පොඩි අවුලක් මචං, සර්වර් එකේ කේස් එකක් වගේ. විනාඩියකින් ආයේ දාපන්.";
+        // 2. Blackbox.ai (Backup)
+        async () => {
+            const res = await axios.post('https://api.blackbox.ai/api/chat', { 
+                messages: [{ content: prompt, role: "user" }], 
+                model: "deepseek-ai/DeepSeek-V3", max_tokens: 400
+            });
+            return res.data.replace(/\$@\$.*?\$@\$/g, '').trim();
+        },
+
+        // 3. Pollinations AI (Backup 2)
+        async () => (await axios.get(`https://text.pollinations.ai/${encodeURIComponent(prompt)}?model=openai`)).data,
+    ];
+
+    for (let i = 0; i < providers.length; i++) {
+        try {
+            const reply = await providers[i]();
+            
+            if (!reply || reply.length < 2) continue;
+            if (typeof reply !== 'string') continue;
+            if (reply.includes("Error") || reply.includes("Rate limit")) continue;
+
+            return humanizeReply(String(reply).replace(/^"|"$/g, '').trim());
+            
+        } catch (e) {
+            // console.log(`Provider ${i+1} Failed`);
+        }
     }
+
+    return "Server busy machan, try again later 😅";
 }
 
 async function handleAssistantRequest(sock, from, text) {
@@ -180,9 +260,9 @@ async function handleAssistantRequest(sock, from, text) {
         await sock.sendMessage(from, { text: reply });
     } else {
         // Human වගේ පේන්න පොඩි වෙලාවක් අරන් යවනවා
-        await new Promise(r => setTimeout(r, 800 + Math.random() * 1000)); 
+        await new Promise(r => setTimeout(r, 600 + Math.random() * 800)); 
         await sock.sendMessage(from, { text: reply });
     }
 }
 
-module.exports = { getSmartReply, handleAssistantRequest };
+module.exports = { getSmartReply, handleAssistantRequest, reloadKnowledge: ingestBooks };
